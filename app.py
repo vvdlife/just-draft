@@ -1,0 +1,333 @@
+import os
+import json
+import time
+from typing import Optional, Dict, Any, List
+import pandas as pd
+
+import streamlit as st
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+# ---------------------------------------------------------
+# 1. Configuration & Setup (Architect View)
+# ---------------------------------------------------------
+def load_config():
+    """Load configuration securely from .env or Streamlit secrets."""
+    load_dotenv()
+    
+    api_key = os.getenv("GOOGLE_API_KEY")
+    # Streamlit Cloud deployment support
+    if not api_key:
+        try:
+            # st.secrets access triggers a file search; ignore if not found
+            if "GOOGLE_API_KEY" in st.secrets:
+                api_key = st.secrets["GOOGLE_API_KEY"]
+        except Exception:
+            pass
+        
+    return api_key
+
+def configure_page():
+    """Setup Streamlit page metadata."""
+    st.set_page_config(
+        page_title="Just Draft",
+        page_icon="📝",
+        layout="wide",
+        initial_sidebar_state="collapsed"  # Mobile optimization: Auto-collapse sidebar
+    )
+
+def init_session_state():
+    """Initialize session state for history."""
+    if "history" not in st.session_state:
+        st.session_state.history = []
+
+# ---------------------------------------------------------
+# 2. Key Prompts (Planner View)
+# ---------------------------------------------------------
+SYSTEM_PROMPT = """
+### Role
+You are 'Just Draft', an AI agent that converts unstructured user text into structured JSON data.
+
+### Goal
+Analyze the input text and extract 'Tasks' and 'Memos'. Return the result strictly in the defined JSON format.
+
+### Processing Rules
+1. Analysis: Identify actionable items (Tasks) and reference information (Memos/Ideas).
+2. Refinement: Convert tasks into clear, action-oriented sentences (ending with verbs like -하기). Remove filler words.
+3. Categorization: Assign a category (Work, Personal, Health, Shopping, Other).
+4. Priority & Date: Detect urgency for priority ("High"/"Normal") and extract dates if present.
+5. Language: Output content must be in Korean.
+
+### Output Schema (JSON Only)
+{
+  "tasks": [
+    {
+      "category": "String (Work/Personal/Shopping/Health/Other)",
+      "action": "String (Refined action item)",
+      "priority": "String (High/Normal)",
+      "deadline": "String (YYYY-MM-DD, Time, or text description / null if none)"
+    }
+  ],
+  "memos": [
+    {
+      "content": "String (Non-actionable notes or ideas)"
+    }
+  ]
+}
+"""
+
+# ---------------------------------------------------------
+# 3. Core Logic (Developer View)
+# ---------------------------------------------------------
+def process_input(api_key: str, user_text: str, image_file=None, audio_file=None) -> Dict[str, Any]:
+    """
+    Call Gemini API to process text, image, or audio.
+    Supports multi-modal inputs.
+    """
+    if not (user_text.strip() or image_file or audio_file):
+        return {}
+
+    genai.configure(api_key=api_key)
+    
+    # Priority list of models
+    # Note: 1.5-flash and above support multi-modal efficiently
+    candidate_models = [
+        "gemini-3.0-flash",       
+        "gemini-2.0-flash",       
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-latest",
+        "gemini-pro" # Note: gemini-pro (1.0) is text-only, might fail if image passed. Logic handles fallback.
+    ]
+    
+    # Prepare Content parts
+    content_parts = []
+    
+    # 1. Text
+    if user_text:
+        content_parts.append(user_text)
+    else:
+        # If no text provided, add a prompt to guide the model for image/audio
+        content_parts.append("Analyze this content and extract tasks/memos.")
+
+    # 2. Image (Bytes)
+    if image_file:
+        from PIL import Image
+        img = Image.open(image_file)
+        content_parts.append(img)
+
+    # 3. Audio (Bytes + MimeType)
+    if audio_file:
+        # Streamlit audio_input returns a file-like object (WAV)
+        # We need to read bytes and specify mime_type
+        audio_bytes = audio_file.read()
+        content_parts.append({
+            "mime_type": "audio/wav",
+            "data": audio_bytes
+        })
+
+    last_error = None
+
+    for model_name in candidate_models:
+        try:
+            # Skip text-only models if media is present
+            if (image_file or audio_file) and "gemini-pro" in model_name and "1.5" not in model_name and "2.0" not in model_name and "3.0" not in model_name:
+                continue
+
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=SYSTEM_PROMPT,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            
+            # Generate
+            response = model.generate_content(content_parts)
+            
+            # Parse JSON
+            data = json.loads(response.text)
+            return data
+            
+        except Exception as e:
+            last_error = e
+            if "404" in str(e) or "not found" in str(e).lower():
+                continue
+            continue
+
+    raise RuntimeError(
+        f"All models failed. Last error: {str(last_error)}"
+    )
+
+def convert_to_csv(data: List[Dict]) -> str:
+    """Convert list of dicts to CSV string."""
+    if not data:
+        return ""
+    df = pd.DataFrame(data)
+    return df.to_csv(index=False).encode('utf-8-sig')
+
+def convert_to_markdown(tasks: List[Dict], memos: List[Dict]) -> str:
+    """Convert data to Markdown format."""
+    md = "# Brain Cleaner Results\n\n"
+    
+    md += "## ✅ Tasks\n"
+    for t in tasks:
+        p_icon = "🔥" if t.get('priority') == 'High' else "🔹"
+        md += f"- [{t.get('category')}] {t.get('action')} {p_icon}"
+        if t.get('deadline'):
+            md += f" (📅 {t['deadline']})"
+        md += "\n"
+        
+    md += "\n## 💡 Memos\n"
+    for m in memos:
+        md += f"- {m.get('content')}\n"
+        
+    return md
+
+# ---------------------------------------------------------
+# 4. User Interface (Frontend)
+# ---------------------------------------------------------
+def main():
+    configure_page()
+    init_session_state()
+    
+    # 1. Compact Header (Mobile First)
+    st.title("📝 Just Draft")
+    # Removed verbose description to save screen space
+    
+    # 2. Configuration (Collapsible for Mobile)
+    env_api_key = load_config()
+    api_key = None
+    
+    with st.expander("⚙️ 설정 (API Key)", expanded=False):
+        api_key_input = st.text_input(
+            "Google API Key",
+            type="password",
+            placeholder="AI Studio 키 입력",
+            help="저장되지 않음. 1회성 사용."
+        )
+        if api_key_input:
+            api_key = api_key_input
+            st.success("Custom Key 사용 중")
+        elif env_api_key:
+            api_key = env_api_key
+            st.info(f"시스템 Key 사용 중 ({env_api_key[:4]}...)")
+        else:
+            st.warning("API Key가 필요합니다.")
+            st.markdown("[키 발급받기](https://aistudio.google.com/)")
+
+    # History Drawer (Sidebar)
+    with st.sidebar:
+        st.header("🕒 히스토리")
+        if st.session_state.history:
+            for item in reversed(st.session_state.history):
+                st.text(f"• {item.get('summary', 'Input')}")
+        else:
+            st.caption("기록 없음")
+        
+        st.divider()
+        st.caption("v1.4.0 (Mobile First)")
+
+    # 3. Main Input (Full Width & Touch Friendly)
+    if not api_key:
+        st.error("👆 위 설정에서 API Key를 먼저 입력해주세요.")
+        return
+
+    # Tabs for simple switching
+    tab_text, tab_image, tab_audio = st.tabs(["📝 텍스트", "📸 이미지", "🎙️ 음성"])
+    
+    user_text = ""
+    image_file = None
+    audio_file = None
+    submit = False
+
+    with tab_text:
+        user_text = st.text_area(
+            "Quick Input",
+            height=120,
+            placeholder="생각나는 대로 적으세요...",
+            label_visibility="collapsed"
+        )
+        # Big Button for Touch
+        if st.button("🚀 텍스트로 정리하기", type="primary", use_container_width=True):
+            submit = True
+
+    with tab_image:
+        image_file = st.file_uploader("이미지 업로드", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed")
+        if image_file:
+            st.image(image_file, use_container_width=True)
+            if st.button("🚀 이미지 분석하기", type="primary", use_container_width=True):
+                submit = True
+    
+    with tab_audio:
+        audio_file = st.audio_input("음성 녹음")
+        if audio_file:
+            if st.button("🚀 음성 정리하기", type="primary", use_container_width=True):
+                submit = True
+
+    # Processing
+    if submit:
+        source_summary = "Text"
+        if image_file: source_summary = "Image"
+        if audio_file: source_summary = "Audio"
+        if user_text: source_summary = user_text[:15] + "..."
+
+        with st.spinner("분석 중..."):
+            try:
+                result_data = process_input(api_key, user_text, image_file, audio_file)
+                if result_data:
+                    st.session_state.history.append({
+                        "summary": source_summary,
+                        "result": result_data,
+                        "timestamp": time.time()
+                    })
+                    st.session_state['current_result'] = result_data
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+
+    # Rendering (Mobile Optimized View)
+    if 'current_result' in st.session_state:
+        result_data = st.session_state['current_result']
+        st.divider()
+        
+        # Tasks
+        st.subheader("✅ 할 일")
+        tasks = result_data.get("tasks", [])
+        updated_tasks = []
+        
+        if tasks:
+            # Simple Data Editor for Mobile? st.data_editor might be cramped on mobile.
+            # But user wanted "Interactive". Let's keep it but minimize config.
+            df_tasks = pd.DataFrame(tasks)
+            cols = [c for c in ['priority', 'action'] if c in df_tasks.columns] # Show less cols on mobile
+            if 'category' in df_tasks.columns: cols.insert(0, 'category')
+            
+            df_display = df_tasks[cols] if cols else pd.DataFrame(tasks)
+            
+            edited_df = st.data_editor(
+                df_display,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="mobile_editor"
+            )
+            updated_tasks = edited_df.to_dict('records')
+        else:
+            st.info("No tasks.")
+
+        # Memos
+        memos = result_data.get("memos", [])
+        if memos:
+            st.subheader("💡 메모")
+            for memo in memos:
+                st.info(f"{memo['content']}") # Use info box for card-like feel
+
+        # Export (Full Width Buttons)
+        with st.expander("📥 결과 내보내기"):
+            json_str = json.dumps({"tasks": updated_tasks, "memos": memos}, indent=2, ensure_ascii=False)
+            st.download_button("JSON 저장", json_str, "brain.json", "application/json", use_container_width=True)
+            
+            csv_data = convert_to_csv(updated_tasks)
+            if csv_data: st.download_button("CSV 저장", csv_data, "tasks.csv", "text/csv", use_container_width=True)
+            
+            md_data = convert_to_markdown(updated_tasks, memos)
+            st.download_button("Markdown 저장", md_data, "brain.md", "text/markdown", use_container_width=True)
+
+if __name__ == "__main__":
+    main()
