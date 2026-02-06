@@ -117,7 +117,8 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     # Priority list of models
     # Note: 1.5-flash and above support multi-modal efficiently
     candidate_models = [
-        "gemini-3.0-flash" 
+        "gemini-3.0-flash",
+        "gemini-1.5-flash"  # Fallback
     ]
     
     # Prepare Content parts
