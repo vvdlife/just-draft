@@ -137,6 +137,7 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
         # Reset file pointer to the beginning as st.image might have read it
         image_file.seek(0)
         img = Image.open(image_file)
+        img.load()  # Force load data into memory to prevent file pointer issues during retries
         content_parts.append(img)
 
     # 3. Audio (Bytes + MimeType)
