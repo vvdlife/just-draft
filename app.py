@@ -11,21 +11,38 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------
 # 1. Configuration & Setup (Architect View)
 # ---------------------------------------------------------
-def load_config():
-    """Load configuration securely from .env or Streamlit secrets."""
-    load_dotenv()
+
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    # 1. If password is not set in secrets, allow access (or warn)
+    # For security, we assume if secrets are used, password must be there.
+    if "APP_PASSWORD" not in st.secrets:
+        st.error("⚠️ 설정 오류: APP_PASSWORD가 Secret에 설정되지 않았습니다.")
+        return False
+
+    # 2. Return True if the user has already authenticated
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # 3. Show input for password
+    st.title("🔒 보호된 페이지")
+    st.text_input(
+        "비밀번호를 입력하세요", type="password", on_change=password_entered, key="password"
+    )
     
-    api_key = os.getenv("GOOGLE_API_KEY")
-    # Streamlit Cloud deployment support
-    if not api_key:
-        try:
-            # st.secrets access triggers a file search; ignore if not found
-            if "GOOGLE_API_KEY" in st.secrets:
-                api_key = st.secrets["GOOGLE_API_KEY"]
-        except Exception:
-            pass
-        
-    return api_key
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 비밀번호가 틀렸습니다.")
+
+    return False
 
 def configure_page():
     """Setup Streamlit page metadata."""
@@ -196,27 +213,27 @@ def main():
     configure_page()
     init_session_state()
     
+    # 0. Security Check
+    if not check_password():
+        st.stop()
+
     # 1. Compact Header (Mobile First)
     st.title("📝 Just Draft")
     # Removed verbose description to save screen space
     
     # 2. Configuration (Collapsible for Mobile)
-    env_api_key = load_config()
     api_key = None
     
-    with st.expander("⚙️ 설정 (API Key)", expanded=False):
+    with st.expander("⚙️ 설정 (API Key)", expanded=True):
         api_key_input = st.text_input(
             "Google API Key",
             type="password",
-            placeholder="AI Studio 키 입력",
+            placeholder="AI Studio 키 입력 (필수)",
             help="저장되지 않음. 1회성 사용."
         )
         if api_key_input:
             api_key = api_key_input
             st.success("Custom Key 사용 중")
-        elif env_api_key:
-            api_key = env_api_key
-            st.info(f"시스템 Key 사용 중 ({env_api_key[:4]}...)")
         else:
             st.warning("API Key가 필요합니다.")
             st.markdown("[키 발급받기](https://aistudio.google.com/)")
