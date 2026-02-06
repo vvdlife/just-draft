@@ -133,12 +133,13 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
 
     # 2. Image (Bytes)
     if image_file:
-        from PIL import Image
-        # Reset file pointer to the beginning as st.image might have read it
+        # Use raw bytes for robust retry (avoid PIL file pointer issues)
         image_file.seek(0)
-        img = Image.open(image_file)
-        img.load()  # Force load data into memory to prevent file pointer issues during retries
-        content_parts.append(img)
+        image_bytes = image_file.read()
+        content_parts.append({
+            "mime_type": image_file.type,
+            "data": image_bytes
+        })
 
     # 3. Audio (Bytes + MimeType)
     if audio_file:
