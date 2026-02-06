@@ -117,11 +117,10 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     # Priority list of models
     # Note: 1.5-flash and above support multi-modal efficiently
     candidate_models = [
-        "gemini-3.0-flash",       
-        "gemini-2.0-flash",       
-        "gemini-1.5-flash", 
-        "gemini-1.5-flash-latest",
-        "gemini-pro" # Note: gemini-pro (1.0) is text-only, might fail if image passed. Logic handles fallback.
+        "gemini-2.0-flash-exp",   # Experimental 2.0
+        "gemini-1.5-flash",       # Stable 1.5 Flash
+        "gemini-1.5-pro",         # Stable 1.5 Pro (Fallback)
+        "gemini-1.5-flash-latest" 
     ]
     
     # Prepare Content parts
@@ -137,6 +136,8 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     # 2. Image (Bytes)
     if image_file:
         from PIL import Image
+        # Reset file pointer to the beginning as st.image might have read it
+        image_file.seek(0)
         img = Image.open(image_file)
         content_parts.append(img)
 
@@ -155,7 +156,9 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     for model_name in candidate_models:
         try:
             # Skip text-only models if media is present
-            if (image_file or audio_file) and "gemini-pro" in model_name and "1.5" not in model_name and "2.0" not in model_name and "3.0" not in model_name:
+            # 1.5 and 2.0 support multimodal
+            is_multimodal = "1.5" in model_name or "2.0" in model_name
+            if (image_file or audio_file) and not is_multimodal:
                 continue
 
             model = genai.GenerativeModel(
