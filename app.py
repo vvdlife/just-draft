@@ -354,7 +354,10 @@ def main():
             st.download_button("JSON 저장", json_str, "brain.json", "application/json", use_container_width=True)
             
             csv_data = convert_to_csv(updated_tasks)
-            if csv_data: st.download_button("CSV 저장", csv_data, "tasks.csv", "text/csv", use_container_width=True)
+            if csv_data: st.download_button("CSV 저장 (할 일)", csv_data, "tasks.csv", "text/csv", use_container_width=True)
+
+            csv_memos = convert_to_csv(memos)
+            if csv_memos: st.download_button("CSV 저장 (메모)", csv_memos, "memos.csv", "text/csv", use_container_width=True)
             
             md_data = convert_to_markdown(updated_tasks, memos)
             st.download_button("Markdown 저장", md_data, "brain.md", "text/markdown", use_container_width=True)
