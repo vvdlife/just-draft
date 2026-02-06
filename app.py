@@ -117,8 +117,8 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     # Priority list of models
     # Note: 1.5-flash and above support multi-modal efficiently
     candidate_models = [
-        "gemini-3.0-flash",
-        "gemini-1.5-flash"  # Fallback
+        "gemini-3-flash-preview", # Correct ID from docs
+        "gemini-1.5-flash"        # Fallback
     ]
     
     # Prepare Content parts
@@ -155,8 +155,9 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     for model_name in candidate_models:
         try:
             # Skip text-only models if media is present
-            # 1.5, 2.0, 3.0 support multimodal
-            is_multimodal = "1.5" in model_name or "2.0" in model_name or "3.0" in model_name
+            # 1.5, 2.0, 2.5, 3 support multimodal
+            # Check for "gemini-3" to cover "gemini-3-flash-preview"
+            is_multimodal = "1.5" in model_name or "2.0" in model_name or "2.5" in model_name or "gemini-3" in model_name
             if (image_file or audio_file) and not is_multimodal:
                 continue
 
