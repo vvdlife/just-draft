@@ -117,10 +117,7 @@ def process_input(api_key: str, user_text: str, image_file=None, audio_file=None
     # Priority list of models
     # Note: 1.5-flash and above support multi-modal efficiently
     candidate_models = [
-        "gemini-2.0-flash-exp",   # Experimental 2.0
-        "gemini-1.5-flash",       # Stable 1.5 Flash
-        "gemini-1.5-pro",         # Stable 1.5 Pro (Fallback)
-        "gemini-1.5-flash-latest" 
+        "gemini-3.0-flash" 
     ]
     
     # Prepare Content parts
