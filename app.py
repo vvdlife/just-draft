@@ -41,6 +41,29 @@ def init_session_state():
     if "history" not in st.session_state:
         st.session_state.history = []
 
+def reset_app():
+    """Reset the application state to start a new task."""
+    st.session_state.pop('current_result', None)
+    # Clear input widgets by resetting their keys in session_state if needed,
+    # or just rely on Streamlit's behavior when we rerun if we manipulate the keys.
+    # A robust way is to manually clear the keys we use.
+    if 'user_text_input' in st.session_state:
+        st.session_state['user_text_input'] = ""
+    if 'image_input' in st.session_state:
+        st.session_state['image_input'] = None
+    # Audio input in Streamlit is tricky to reset programmatically in some versions, 
+    # but removing the key usually works or relying on rerun.
+    # Note: Streamlit's st.audio_input might not support direct clearing via state easily dependent on version,
+    # but setting it to None often works or just rerun.
+    
+    # Actually, simpler way for inputs with 'key': set them to None/Empty
+    st.session_state.user_text_input = "" 
+    st.session_state.image_input = None
+    # st.audio_input doesn't always support state modification to clear it easily in all versions, 
+    # but let's try popping it.
+    if 'audio_input' in st.session_state:
+        del st.session_state['audio_input']
+
 # ---------------------------------------------------------
 # 2. Key Prompts (Planner View)
 # ---------------------------------------------------------
@@ -243,21 +266,22 @@ def main():
             "Quick Input",
             height=120,
             placeholder="생각나는 대로 적으세요...",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="user_text_input"
         )
         # Big Button for Touch
         if st.button("🚀 텍스트로 정리하기", type="primary", use_container_width=True):
             submit = True
 
     with tab_image:
-        image_file = st.file_uploader("이미지 업로드", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed")
+        image_file = st.file_uploader("이미지 업로드", type=['png', 'jpg', 'jpeg'], label_visibility="collapsed", key="image_input")
         if image_file:
             st.image(image_file, use_container_width=True)
             if st.button("🚀 이미지 분석하기", type="primary", use_container_width=True):
                 submit = True
     
     with tab_audio:
-        audio_file = st.audio_input("음성 녹음")
+        audio_file = st.audio_input("음성 녹음", key="audio_input")
         if audio_file:
             if st.button("🚀 음성 정리하기", type="primary", use_container_width=True):
                 submit = True
@@ -328,6 +352,8 @@ def main():
             
             md_data = convert_to_markdown(updated_tasks, memos)
             st.download_button("Markdown 저장", md_data, "brain.md", "text/markdown", use_container_width=True)
+
+        st.button("🔄 새로 시작하기", on_click=reset_app, type="secondary", use_container_width=True)
 
 if __name__ == "__main__":
     main()
